@@ -15,6 +15,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { ZapatillasService } from './zapatillas.service.js';
 import { CreateZapatillaDto } from './dto/create-zapatilla.dto.js';
 import { UpdateZapatillaDto } from './dto/update-zapatilla.dto.js';
+import { FilterZapatillasDto } from './dto/filter-zapatillas.dto.js';
 import { UploadedFileDto } from './file-upload.interface.js';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../auth/guards/roles.guard.js';
@@ -25,11 +26,11 @@ import { UserRole } from '../auth/user.interface.js';
 export class ZapatillasController {
   constructor(private readonly zapatillasService: ZapatillasService) {}
 
-  // Catálogo público: solo devuelve zapatillas activas (o todas si admin envía ?all=true)
+  // Catálogo público: solo devuelve zapatillas activas (o todas si admin envía ?all=true).
+  // Admite filtros: q, marca, talla, precioMin, precioMax, orden, soloConStock
   @Get()
-  findAll(@Query('all') all?: string) {
-    const includeInactive = all === 'true';
-    return this.zapatillasService.findAll(includeInactive);
+  findAll(@Query() filters: FilterZapatillasDto) {
+    return this.zapatillasService.findAll(filters);
   }
 
   // Ver detalle

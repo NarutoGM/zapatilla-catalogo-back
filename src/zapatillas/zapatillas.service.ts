@@ -5,6 +5,7 @@ import { extname } from 'path';
 import sharp from 'sharp';
 import { FirebaseService } from '../firebase/firebase.service.js';
 import { CreateZapatillaDto } from './dto/create-zapatilla.dto.js';
+import { FilterZapatillasDto, OrdenCriterio } from './dto/filter-zapatillas.dto.js';
 import { UpdateZapatillaDto } from './dto/update-zapatilla.dto.js';
 import { UploadedFileDto } from './file-upload.interface.js';
 
@@ -127,18 +128,83 @@ export class ZapatillasService {
   }
 
   // Lista solo las zapatillas ACTIVAS para el catálogo público
-  // o todas si se especifica includeInactive (para el panel admin)
-  async findAll(includeInactive = false): Promise<Zapatilla[]> {
+  // (o todas con ?all=true, para el panel admin) y aplica los filtros de búsqueda.
+  async findAll(filters: FilterZapatillasDto = {}): Promise<Zapatilla[]> {
+    const includeInactive = filters.all === 'true';
     let query: any = this.collection;
     if (!includeInactive) {
       query = query.where('activo', '==', true);
     }
 
     const snapshot = await query.get();
-    return snapshot.docs.map((doc: QueryDocumentSnapshot) => ({
+    const zapatillas: Zapatilla[] = snapshot.docs.map((doc: QueryDocumentSnapshot) => ({
       id: doc.id,
       ...(doc.data() as Omit<Zapatilla, 'id'>),
     }));
+
+    return this.aplicarFiltros(zapatillas, filters);
+  }
+
+  // Firestore no busca texto dentro de un campo, así que los filtros se aplican
+  // en el servidor sobre la lista que ya se trajo.
+  private aplicarFiltros(zapatillas: Zapatilla[], f: FilterZapatillasDto): Zapatilla[] {
+    let result = zapatillas;
+
+    if (f.q && f.q.trim()) {
+      const term = f.q.toLowerCase().trim();
+      result = result.filter(
+        (z) =>
+          (z.nombre ?? '').toLowerCase().includes(term) ||
+          (z.marca ?? '').toLowerCase().includes(term) ||
+          (z.descripcion ?? '').toLowerCase().includes(term),
+      );
+    }
+
+    if (f.marca && f.marca.trim()) {
+      const marca = f.marca.toLowerCase().trim();
+      result = result.filter((z) => (z.marca ?? '').toLowerCase() === marca);
+    }
+
+    if (f.talla !== undefined) {
+      // La talla se guarda como texto y puede traer varias: "40, 41, 42"
+      result = result.filter((z) => this.tallasDe(z).includes(f.talla as number));
+    }
+
+    if (f.precioMin !== undefined) {
+      result = result.filter((z) => z.precio >= (f.precioMin as number));
+    }
+
+    if (f.precioMax !== undefined) {
+      result = result.filter((z) => z.precio <= (f.precioMax as number));
+    }
+
+    if (f.soloConStock) {
+      result = result.filter((z) => z.stock > 0);
+    }
+
+    switch (f.orden) {
+      case OrdenCriterio.PRECIO_ASC:
+        result = [...result].sort((a, b) => a.precio - b.precio);
+        break;
+      case OrdenCriterio.PRECIO_DESC:
+        result = [...result].sort((a, b) => b.precio - a.precio);
+        break;
+      case OrdenCriterio.NUEVO:
+        result = [...result].sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
+        break;
+      case OrdenCriterio.NOMBRE:
+        result = [...result].sort((a, b) => (a.nombre ?? '').localeCompare(b.nombre ?? ''));
+        break;
+    }
+
+    return result;
+  }
+
+  private tallasDe(z: Zapatilla): number[] {
+    return String(z.talla ?? '')
+      .split(/[,;/\s]+/)
+      .map((t) => Number(t))
+      .filter((n) => !Number.isNaN(n));
   }
 
   async findOne(id: string): Promise<Zapatilla> {
